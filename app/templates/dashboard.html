@@ -1,0 +1,395 @@
+{% extends "base.html" %}
+{% block title %}Дашборд — FinTrack Pro{% endblock %}
+{% block body %}
+<div x-data="dashboard()" x-init="init()" class="min-h-screen flex pb-10">
+    <!-- Sidebar -->
+    <aside class="w-64 bg-white dark:bg-surface-900 border-r border-slate-200 dark:border-slate-800 p-4 hidden lg:flex flex-col">
+        <div class="flex items-center gap-3 mb-8">
+            <div class="w-10 h-10 rounded-xl bg-primary-600 flex items-center justify-center text-white">
+                <i data-lucide="wallet" class="w-5 h-5"></i>
+            </div>
+            <span class="font-bold text-lg">FinTrack Pro</span>
+        </div>
+        <nav class="space-y-1 flex-1">
+            <button @click="tab='dashboard'" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition"
+                    :class="tab==='dashboard' ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'">
+                <i data-lucide="layout-dashboard" class="w-5 h-5"></i> Дашборд
+            </button>
+            <button @click="tab='transactions'" class="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition"
+                    :class="tab==='transactions' ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300' : 'text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800'">
+                <i data-lucide="arrow-left-right" class="w-5 h-5"></i> Транзакции
+            </button>
+        </nav>
+        <div class="pt-4 border-t border-slate-200 dark:border-slate-800">
+            <p class="text-sm font-medium truncate" x-text="user?.full_name || user?.username || '...'"></p>
+            <p class="text-xs text-slate-500 truncate" x-text="user?.email || ''"></p>
+            <button @click="logout()" class="mt-3 text-sm text-red-600 hover:underline">Выйти</button>
+        </div>
+    </aside>
+
+    <!-- Main -->
+    <main class="flex-1 p-4 sm:p-6 overflow-auto">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-2xl font-semibold" x-text="tab === 'dashboard' ? 'Дашборд' : 'Транзакции'"></h1>
+            <div class="flex items-center gap-2">
+                <button @click="loadAll()" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800" title="Обновить">
+                    <i data-lucide="refresh-cw" class="w-5 h-5" :class="loading && 'animate-spin'"></i>
+                </button>
+                <button @click="dark = !dark; $nextTick(() => lucide.createIcons())" class="p-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800">
+                    <i data-lucide="moon" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+
+        <div x-show="loading && !stats" class="text-slate-500 mb-4">Загрузка...</div>
+        <div x-show="error" x-cloak class="mb-4 p-3 rounded-lg bg-red-50 dark:bg-red-900/30 text-red-600 text-sm" x-text="error"></div>
+
+        <!-- Stats -->
+        <div x-show="tab === 'dashboard'" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 mb-6">
+            <div class="bg-white dark:bg-surface-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 card-hover">
+                <p class="text-sm text-slate-500 mb-1">Общий баланс</p>
+                <p class="text-2xl font-bold" x-text="formatMoney(stats?.total_balance)"></p>
+            </div>
+            <div class="bg-white dark:bg-surface-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 card-hover">
+                <p class="text-sm text-slate-500 mb-1">Доходы (период)</p>
+                <p class="text-2xl font-bold text-emerald-600" x-text="'+' + formatMoney(stats?.period_income)"></p>
+            </div>
+            <div class="bg-white dark:bg-surface-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 card-hover">
+                <p class="text-sm text-slate-500 mb-1">Расходы (период)</p>
+                <p class="text-2xl font-bold text-red-500" x-text="'-' + formatMoney(stats?.period_expense)"></p>
+            </div>
+            <div class="bg-white dark:bg-surface-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800 card-hover">
+                <p class="text-sm text-slate-500 mb-1">Чистый поток</p>
+                <p class="text-2xl font-bold" x-text="formatMoney((stats?.period_income||0)-(stats?.period_expense||0))"></p>
+            </div>
+        </div>
+
+        <!-- Charts + category % -->
+        <div x-show="tab === 'dashboard'" class="grid grid-cols-1 xl:grid-cols-2 gap-6 mb-6">
+            <div class="bg-white dark:bg-surface-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
+                <h3 class="font-semibold mb-4">Расходы по категориям (сумма и %)</h3>
+                <div class="h-56 mb-4"><canvas id="pieChart"></canvas></div>
+                <div class="space-y-2 max-h-40 overflow-y-auto">
+                    <template x-for="c in (stats?.expense_by_category || [])" :key="c.category_id">
+                        <div class="flex items-center justify-between text-sm">
+                            <div class="flex items-center gap-2">
+                                <span class="w-3 h-3 rounded-full" :style="'background:' + c.color"></span>
+                                <span x-text="c.category_name"></span>
+                            </div>
+                            <div class="text-slate-500">
+                                <span x-text="formatMoney(c.total)"></span>
+                                <span class="ml-2 font-medium" x-text="c.percentage + '%'"></span>
+                            </div>
+                        </div>
+                    </template>
+                    <p x-show="!(stats?.expense_by_category?.length)" class="text-sm text-slate-400">Нет расходов за период</p>
+                </div>
+            </div>
+            <div class="bg-white dark:bg-surface-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
+                <h3 class="font-semibold mb-4">Доходы vs Расходы</h3>
+                <div class="h-64"><canvas id="barChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Add transaction -->
+        <div class="mb-4 flex flex-wrap gap-3">
+            <button @click="showForm = !showForm"
+                    class="px-4 py-2 rounded-xl bg-primary-600 text-white text-sm font-medium hover:bg-primary-700 transition">
+                + Добавить транзакцию
+            </button>
+        </div>
+
+        <div x-show="showForm" x-cloak class="mb-6 bg-white dark:bg-surface-900 rounded-2xl p-5 border border-slate-200 dark:border-slate-800">
+            <h3 class="font-semibold mb-4">Новая транзакция</h3>
+            <form @submit.prevent="createTx()" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm mb-1">Тип</label>
+                    <select x-model="txForm.type" class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-surface-800">
+                        <option value="expense">Расход</option>
+                        <option value="income">Доход</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Сумма (₽)</label>
+                    <input type="number" step="0.01" min="0.01" x-model="txForm.amount" required
+                           class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-surface-800">
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Счёт</label>
+                    <select x-model="txForm.account_id" required
+                            class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-surface-800">
+                        <option value="">Выберите</option>
+                        <template x-for="a in accounts" :key="a.id">
+                            <option :value="a.id" x-text="a.name + ' (' + formatMoney(a.balance) + ')'"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Категория</label>
+                    <select x-model="txForm.category_id"
+                            class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-surface-800">
+                        <option value="">Без категории</option>
+                        <template x-for="c in categories.filter(c => c.type === txForm.type)" :key="c.id">
+                            <option :value="c.id" x-text="c.name"></option>
+                        </template>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Описание</label>
+                    <input type="text" x-model="txForm.description"
+                           class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-surface-800"
+                           placeholder="Например: продукты в магазине">
+                </div>
+                <div>
+                    <label class="block text-sm mb-1">Дата</label>
+                    <input type="date" x-model="txForm.date"
+                           class="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-surface-800">
+                </div>
+                <div class="sm:col-span-2 lg:col-span-3 flex gap-3">
+                    <button type="submit" class="px-6 py-2 rounded-xl bg-primary-600 text-white font-medium hover:bg-primary-700">Сохранить</button>
+                    <button type="button" @click="showForm=false" class="px-6 py-2 rounded-xl border border-slate-300 dark:border-slate-700">Отмена</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Transactions table -->
+        <div class="bg-white dark:bg-surface-900 rounded-2xl border border-slate-200 dark:border-slate-800 overflow-hidden">
+            <div class="p-4 border-b border-slate-200 dark:border-slate-800 font-semibold">Последние транзакции</div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-slate-50 dark:bg-slate-800/50 text-left">
+                        <tr>
+                            <th class="px-4 py-3">Дата</th>
+                            <th class="px-4 py-3">Описание</th>
+                            <th class="px-4 py-3">Категория</th>
+                            <th class="px-4 py-3">Счёт</th>
+                            <th class="px-4 py-3 text-right">Сумма</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                        <template x-for="tx in transactions" :key="tx.id">
+                            <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/30">
+                                <td class="px-4 py-3 text-slate-500" x-text="tx.date"></td>
+                                <td class="px-4 py-3" x-text="tx.description || '—'"></td>
+                                <td class="px-4 py-3" x-text="tx.category_name || '—'"></td>
+                                <td class="px-4 py-3 text-slate-500" x-text="tx.account_name || '—'"></td>
+                                <td class="px-4 py-3 text-right font-medium"
+                                    :class="tx.type === 'income' ? 'text-emerald-600' : 'text-red-500'"
+                                    x-text="(tx.type === 'income' ? '+' : '-') + formatMoney(tx.amount)"></td>
+                            </tr>
+                        </template>
+                    </tbody>
+                </table>
+                <p x-show="!transactions.length" class="p-4 text-sm text-slate-400">Пока нет транзакций — добавьте первую</p>
+            </div>
+        </div>
+    </main>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function dashboard() {
+    return {
+        tab: 'dashboard',
+        loading: false,
+        error: '',
+        showForm: false,
+        user: null,
+        stats: null,
+        transactions: [],
+        accounts: [],
+        categories: [],
+        pieChart: null,
+        barChart: null,
+        txForm: {
+            type: 'expense',
+            amount: '',
+            account_id: '',
+            category_id: '',
+            description: '',
+            date: new Date().toISOString().slice(0, 10)
+        },
+
+        async init() {
+            const token = localStorage.getItem('access_token');
+            if (!token) { window.location.href = '/login'; return; }
+            await this.loadAll();
+            this.$nextTick(() => lucide.createIcons());
+        },
+
+        headers() {
+            return {
+                'Authorization': 'Bearer ' + localStorage.getItem('access_token'),
+                'Content-Type': 'application/json'
+            };
+        },
+
+        async api(url) {
+            const res = await fetch(url, { headers: this.headers() });
+            if (res.status === 401) {
+                localStorage.clear();
+                window.location.href = '/login';
+                return null;
+            }
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(typeof err.detail === 'string' ? err.detail : 'Ошибка API');
+            }
+            return res.json();
+        },
+
+        async apiPost(url, body) {
+            const res = await fetch(url, {
+                method: 'POST',
+                headers: this.headers(),
+                body: JSON.stringify(body)
+            });
+            if (res.status === 401) {
+                localStorage.clear();
+                window.location.href = '/login';
+                return null;
+            }
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                let msg = err.detail;
+                if (Array.isArray(msg)) msg = msg.map(e => e.msg || JSON.stringify(e)).join('; ');
+                throw new Error(typeof msg === 'string' ? msg : 'Ошибка');
+            }
+            return res.json();
+        },
+
+        async loadAll() {
+            this.loading = true;
+            this.error = '';
+            try {
+                let [user, stats, transactions, accounts, categories] = await Promise.all([
+                    this.api('/api/auth/me'),
+                    this.api('/api/analytics/dashboard'),
+                    this.api('/api/transactions?limit=50'),
+                    this.api('/api/accounts'),
+                    this.api('/api/categories'),
+                ]);
+                this.user = user;
+                this.stats = stats;
+                this.transactions = transactions || [];
+                this.accounts = accounts || [];
+                this.categories = categories || [];
+
+                if (this.accounts.length === 0) {
+                    await this.apiPost('/api/accounts', {
+                        name: 'Основной счёт', balance: 0, currency: 'RUB', icon: 'wallet', color: '#6366f1'
+                    });
+                    this.accounts = await this.api('/api/accounts') || [];
+                }
+
+                if (this.categories.length === 0) {
+                    const base = [
+                        { name: 'Продукты', type: 'expense', icon: 'shopping-cart', color: '#ef4444' },
+                        { name: 'Транспорт', type: 'expense', icon: 'car', color: '#3b82f6' },
+                        { name: 'Кафе и рестораны', type: 'expense', icon: 'utensils', color: '#f97316' },
+                        { name: 'Жильё', type: 'expense', icon: 'home', color: '#06b6d4' },
+                        { name: 'Развлечения', type: 'expense', icon: 'gamepad-2', color: '#8b5cf6' },
+                        { name: 'Здоровье', type: 'expense', icon: 'heart', color: '#ec4899' },
+                        { name: 'Зарплата', type: 'income', icon: 'banknote', color: '#22c55e' },
+                        { name: 'Фриланс', type: 'income', icon: 'laptop', color: '#84cc16' },
+                    ];
+                    for (const c of base) await this.apiPost('/api/categories', c);
+                    this.categories = await this.api('/api/categories') || [];
+                }
+
+                this.$nextTick(() => this.renderCharts());
+            } catch (e) {
+                this.error = e.message;
+                console.error(e);
+            } finally {
+                this.loading = false;
+                this.$nextTick(() => lucide.createIcons());
+            }
+        },
+
+        formatMoney(v) {
+            if (v == null) return '0 ₽';
+            return new Intl.NumberFormat('ru-RU', {
+                style: 'currency', currency: 'RUB', maximumFractionDigits: 0
+            }).format(v);
+        },
+
+        renderCharts() {
+            if (!this.stats) return;
+            const textColor = document.documentElement.classList.contains('dark') ? '#94a3b8' : '#64748b';
+
+            if (this.pieChart) this.pieChart.destroy();
+            const pieCtx = document.getElementById('pieChart');
+            if (pieCtx && this.stats.expense_by_category?.length) {
+                this.pieChart = new Chart(pieCtx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: this.stats.expense_by_category.map(c => c.category_name),
+                        datasets: [{
+                            data: this.stats.expense_by_category.map(c => c.total),
+                            backgroundColor: this.stats.expense_by_category.map(c => c.color),
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { display: false } },
+                        cutout: '65%'
+                    }
+                });
+            }
+
+            if (this.barChart) this.barChart.destroy();
+            const barCtx = document.getElementById('barChart');
+            if (barCtx && this.stats.monthly_stats?.length) {
+                this.barChart = new Chart(barCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: this.stats.monthly_stats.map(m => m.month),
+                        datasets: [
+                            { label: 'Доходы', data: this.stats.monthly_stats.map(m => m.income), backgroundColor: '#22c55e', borderRadius: 6 },
+                            { label: 'Расходы', data: this.stats.monthly_stats.map(m => m.expense), backgroundColor: '#ef4444', borderRadius: 6 }
+                        ]
+                    },
+                    options: {
+                        responsive: true, maintainAspectRatio: false,
+                        plugins: { legend: { labels: { color: textColor } } },
+                        scales: {
+                            x: { ticks: { color: textColor } },
+                            y: { ticks: { color: textColor } }
+                        }
+                    }
+                });
+            }
+        },
+
+        async createTx() {
+            try {
+                await this.apiPost('/api/transactions', {
+                    type: this.txForm.type,
+                    amount: parseFloat(this.txForm.amount),
+                    account_id: parseInt(this.txForm.account_id),
+                    category_id: this.txForm.category_id ? parseInt(this.txForm.category_id) : null,
+                    description: this.txForm.description || null,
+                    date: this.txForm.date || null,
+                });
+                this.showForm = false;
+                this.txForm = {
+                    type: 'expense', amount: '', account_id: '', category_id: '',
+                    description: '', date: new Date().toISOString().slice(0, 10)
+                };
+                await this.loadAll();
+            } catch (e) {
+                alert(e.message);
+            }
+        },
+
+        logout() {
+            localStorage.clear();
+            window.location.href = '/login';
+        }
+    }
+}
+</script>
+{% endblock %}

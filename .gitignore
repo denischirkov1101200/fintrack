@@ -1,0 +1,12 @@
+@"
+venv/
+__pycache__/
+*.pyc
+.env
+*.db
+fintrack.db
+.idea/
+.vscode/
+data/
+*.log
+"@ | Out-File -Encoding utf8 .gitignore
